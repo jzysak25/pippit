@@ -1,0 +1,14 @@
+{
+  "name": "pippit",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @pippit/cli dev"
+  },
+  "devDependencies": {
+    "@libsql/client": "^0.14.0",
+    "drizzle-kit": "^0.30.6",
+    "drizzle-orm": "^0.40.1"
+  }
+}
