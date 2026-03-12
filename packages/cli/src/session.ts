@@ -14,7 +14,7 @@ export interface LocalConfig {
 const DEFAULT_CONFIG: LocalConfig = {
   jwt: null,
   apiKey: null,
-  preferredModel: 'gemini-3-flash-preview',
+  preferredModel: 'openrouter/auto:free',
 }
 
 export async function readConfig(): Promise<LocalConfig> {

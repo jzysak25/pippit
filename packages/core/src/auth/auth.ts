@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai'
 import { randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { getDb } from '../db/client.js'
@@ -23,11 +22,13 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
 }
 
 export async function validateApiKey(key: string): Promise<void> {
-  const ai = new GoogleGenAI({ apiKey: key })
-  await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: 'hi',
+  const res = await fetch('https://openrouter.ai/api/v1/auth/key', {
+    headers: { Authorization: `Bearer ${key}` },
   })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body?.error?.message ?? `Invalid API key (${res.status})`)
+  }
 }
 
 export interface AuthResult {

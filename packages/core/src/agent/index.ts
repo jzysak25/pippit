@@ -1,5 +1,4 @@
-import { GoogleGenAI } from '@google/genai'
-import type { Content, Part } from '@google/genai'
+import OpenAI from 'openai'
 import { buildSystemPrompt } from './prompts.js'
 import type { AgentConfig, ConversationState } from './state.js'
 import { executeTool, toolDefinitions } from './tools.js'
@@ -19,17 +18,22 @@ export interface AgentTurnResult {
   toolResults?: Record<string, unknown>
 }
 
-function toGoogleContents(history: ChatMessage[], message: string): Content[] {
+function buildMessages(
+  user: UserContext,
+  state: ConversationState,
+  history: ChatMessage[],
+  message: string,
+): OpenAI.Chat.ChatCompletionMessageParam[] {
   return [
-    ...history.map(
-      (m): Content => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      }),
-    ),
-    { role: 'user', parts: [{ text: message }] },
+    { role: 'system', content: buildSystemPrompt(user, state) },
+    ...history.map((m): OpenAI.Chat.ChatCompletionMessageParam => ({
+      role: m.role,
+      content: m.content,
+    })),
+    { role: 'user', content: message },
   ]
 }
+
 
 export async function agentTurn(
   user: UserContext,
@@ -38,65 +42,59 @@ export async function agentTurn(
   config: AgentConfig,
   state: ConversationState,
 ): Promise<AgentTurnResult> {
-  const ai = new GoogleGenAI({ apiKey: config.apiKey })
+  const client = new OpenAI({
+    apiKey: config.apiKey,
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultHeaders: {
+      'HTTP-Referer': 'https://github.com/jzysak25/pippit',
+      'X-Title': 'Pippit',
+    },
+  })
 
-  const contents: Content[] = toGoogleContents(history, message)
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = buildMessages(user, state, history, message)
   let updatedState = { ...state }
   let finalText = ''
   const collectedToolResults: Record<string, unknown> = {}
 
   // Agentic loop: keep running until no more tool calls
   while (true) {
-    const response = await ai.models.generateContent({
+    const response = await client.chat.completions.create({
       model: config.model,
-      contents,
-      config: {
-        systemInstruction: buildSystemPrompt(user, state),
-        tools: [{ functionDeclarations: toolDefinitions }],
-      },
+      messages,
+      tools: toolDefinitions,
     })
 
-    const parts: Part[] = response.candidates?.[0]?.content?.parts ?? []
+    const msg = response.choices[0]?.message
+    if (!msg) break
 
-    // Collect text from this turn
-    const text = parts
-      .filter((p) => p.text !== undefined)
-      .map((p) => p.text)
-      .join('')
-    if (text) finalText = text
+    // Always push the assistant message back
+    messages.push(msg)
 
-    // Check for function calls
-    const functionCalls = parts.filter((p) => p.functionCall !== undefined)
-    if (functionCalls.length === 0) break
+    const toolCalls = msg.tool_calls ?? []
 
-    // Add the model's response (with function calls) to the contents
-    contents.push({ role: 'model', parts })
+    if (toolCalls.length === 0) {
+      finalText = msg.content ?? ''
+      break
+    }
 
-    // Execute all tools and collect results
-    const resultParts: Part[] = await Promise.all(
-      functionCalls.map(async (p) => {
-        const fc = p.functionCall!
-        const toolName = fc.name ?? ''
-        const result = await executeTool(
-          toolName,
-          (fc.args ?? {}) as Record<string, unknown>,
-          user.id,
-        )
-        try {
-          collectedToolResults[toolName] = JSON.parse(result)
-        } catch {
-          // ignore non-JSON results
-        }
-        return {
-          functionResponse: {
-            name: toolName,
-            response: { result },
-          },
-        }
-      }),
-    )
+    // Execute all tool calls
+    for (const tc of toolCalls) {
+      const name = tc.function.name
+      const input = JSON.parse(tc.function.arguments || '{}') as Record<string, unknown>
+      const result = await executeTool(name, input, user.id)
 
-    contents.push({ role: 'user', parts: resultParts })
+      try {
+        collectedToolResults[name] = JSON.parse(result)
+      } catch {
+        // ignore non-JSON
+      }
+
+      messages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: result,
+      })
+    }
   }
 
   return { text: finalText, updatedState, toolResults: collectedToolResults }

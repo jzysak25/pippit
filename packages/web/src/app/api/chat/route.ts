@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
           { id: user.id, username: user.username, location: user.location ?? undefined, preferences: user.preferences ?? undefined },
           message,
           history,
-          { apiKey, model: 'gemini-3-flash-preview' },
+          { apiKey, model: 'openrouter/auto:free' },
           state,
         )
 

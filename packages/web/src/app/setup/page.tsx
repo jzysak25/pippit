@@ -83,7 +83,7 @@ export default function SetupPage() {
               value={apiKey} onChange={e => setApiKey(e.target.value)} required
             />
             <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-              Get a free key at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a>. Stored locally only.
+              Get a free key at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai</a>. Stored locally only.
             </p>
             {error && <p style={{ color: '#f87171', fontSize: 13, marginBottom: 12 }}>{error}</p>}
             <button style={btnStyle} disabled={loading}>{loading ? 'Validating...' : 'Continue'}</button>

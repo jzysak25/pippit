@@ -34,7 +34,7 @@ export function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [apiKey, setApiKey] = useState<string | null>(null)
-  const [model, setModel] = useState('gemini-3-flash-preview') // overridden by config on load
+  const [model, setModel] = useState('openrouter/auto:free') // overridden by config on load
   const [state, setState] = useState<ConversationState>(initialState())
   const [history, setHistory] = useState<ChatMessage[]>([])
   const [setupMode, setSetupMode] = useState<SetupMode>('checking')
@@ -88,7 +88,7 @@ export function App() {
         setSetupMode('needs_key')
         setMessages([
           systemMsg(
-            'Welcome to Pippit — an AI-powered peer-to-peer marketplace!\n\nTo get started, enter your Google AI Studio API key.\nGet one free at aistudio.google.com — it stays on your machine only.',
+            'Welcome to Pippit — an AI-powered peer-to-peer marketplace!\n\nTo get started, enter your OpenRouter API key.\nGet one free at openrouter.ai — it stays on your machine only.',
           ),
         ])
       }
@@ -229,7 +229,7 @@ export function App() {
           setSetupMode('needs_key')
           addMsg(
             systemMsg(
-              `That key didn't work — ${err instanceof Error ? err.message : String(err)}\n\nPlease check it and try again. Get one at aistudio.google.com.`,
+              `That key didn't work — ${err instanceof Error ? err.message : String(err)}\n\nPlease check it and try again. Get one at openrouter.ai.`,
             ),
           )
         }

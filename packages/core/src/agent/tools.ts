@@ -1,5 +1,4 @@
-import { Type } from '@google/genai'
-import type { FunctionDeclaration, Schema } from '@google/genai'
+import type OpenAI from 'openai'
 import { randomUUID } from 'node:crypto'
 import { getDb } from '../db/client.js'
 import {
@@ -31,221 +30,54 @@ import {
   updateWantedRequestStatus,
 } from '../db/queries/wanted_requests.js'
 
-// ─── Tool definitions (Google FunctionDeclaration format) ────────────────────
+// ─── Tool definitions (OpenAI function calling format) ───────────────────────
 
-function str(description: string): Schema {
-  return { type: Type.STRING, description }
+type Prop = Record<string, unknown>
+function str(description: string): Prop { return { type: 'string', description } }
+function num(description: string): Prop { return { type: 'number', description } }
+function strEnum(values: string[], description?: string): Prop { return { type: 'string', enum: values, description } }
+
+function tool(name: string, description: string, parameters: Record<string, unknown>): OpenAI.Chat.ChatCompletionTool {
+  return { type: 'function', function: { name, description, parameters } }
 }
-function num(description: string): Schema {
-  return { type: Type.NUMBER, description }
-}
-function strEnum(values: string[], description?: string): Schema {
-  return { type: Type.STRING, enum: values, description }
+function obj(properties: Record<string, unknown>, required?: string[]) {
+  return required ? { type: 'object', properties, required } : { type: 'object', properties }
 }
 
-export const toolDefinitions: FunctionDeclaration[] = [
-  {
-    name: 'search_listings',
-    description: 'Search active marketplace listings by keywords, category, or price',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        query: str('Search keywords'),
-        category: str('Filter by category'),
-        max_price: num('Maximum price in dollars'),
-      },
-    },
-  },
-  {
-    name: 'create_listing',
-    description:
-      'Create a new item listing for sale. Confirm all details with the user before calling.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        title: str('Listing title'),
-        description: str('Item description'),
-        price: num('Price in dollars'),
-        category: str('Item category'),
-        condition: strEnum(['new', 'like_new', 'good', 'fair', 'parts']),
-        location: str('City or area'),
-        delivery_options: strEnum(['pickup', 'shipping', 'both']),
-      },
-      required: ['title', 'description', 'price', 'category'],
-    },
-  },
-  {
-    name: 'get_my_listings',
-    description: "Get the current user's listings",
-    parameters: { type: Type.OBJECT, properties: {} },
-  },
-  {
-    name: 'get_expiring_listings',
-    description: "Get the current user's active listings that are expiring soon (within 3 days). Call this at session start to proactively alert the user.",
-    parameters: { type: Type.OBJECT, properties: {} },
-  },
-  {
-    name: 'renew_listing',
-    description: 'Renew a listing to extend it for another 30 days',
-    parameters: {
-      type: Type.OBJECT,
-      properties: { listing_id: str('The listing ID to renew') },
-      required: ['listing_id'],
-    },
-  },
-  {
-    name: 'close_listing',
-    description: 'Mark a listing as sold or remove it',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        listing_id: str('The listing ID'),
-        reason: strEnum(['sold', 'archived']),
-      },
-      required: ['listing_id', 'reason'],
-    },
-  },
-  {
-    name: 'create_wanted_request',
-    description: 'Post a wanted request for an item the user is looking to buy',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        title: str('Short title for what is wanted'),
-        description: str('Detailed description of what is wanted'),
-        category: str('Item category'),
-        max_budget: num('Maximum budget in dollars'),
-        location: str('Location'),
-        delivery_preference: strEnum(['pickup', 'shipping', 'either']),
-      },
-      required: ['title', 'description', 'category'],
-    },
-  },
-  {
-    name: 'get_my_wanted_requests',
-    description: "Get the current user's wanted requests",
-    parameters: { type: Type.OBJECT, properties: {} },
-  },
-  {
-    name: 'close_wanted_request',
-    description: 'Close or mark a wanted request as fulfilled',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        request_id: str('The request ID'),
-        reason: strEnum(['fulfilled', 'closed']),
-      },
-      required: ['request_id', 'reason'],
-    },
-  },
-  {
-    name: 'make_offer',
-    description: 'Make an offer on a listing',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        listing_id: str('The listing ID'),
-        amount: num('Offer amount in dollars'),
-        message: str('Optional message to seller'),
-      },
-      required: ['listing_id', 'amount'],
-    },
-  },
-  {
-    name: 'get_my_offers',
-    description: 'Get offers the current user has sent on listings',
-    parameters: { type: Type.OBJECT, properties: {} },
-  },
-  {
-    name: 'get_offers_on_my_listings',
-    description: "Get offers other buyers have made on the current user's listings",
-    parameters: { type: Type.OBJECT, properties: {} },
-  },
-  {
-    name: 'respond_to_offer',
-    description: 'Accept, reject, or counter an offer on your listing',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        offer_id: str('The offer ID'),
-        action: strEnum(['accept', 'reject', 'counter']),
-        counter_amount: num('Counter-offer amount in dollars (required if action is counter)'),
-        counter_message: str('Optional message with the counter-offer'),
-      },
-      required: ['offer_id', 'action'],
-    },
-  },
-  {
-    name: 'respond_to_counter',
-    description: "Accept or reject a seller's counter-offer",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        offer_id: str('The offer ID'),
-        action: strEnum(['accept', 'reject']),
-      },
-      required: ['offer_id', 'action'],
-    },
-  },
-  {
-    name: 'send_message',
-    description: 'Send a message to another user',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        receiver_id: str('The recipient user ID'),
-        body: str('Message body'),
-        offer_id: str('Optional: link message to an offer'),
-      },
-      required: ['receiver_id', 'body'],
-    },
-  },
-  {
-    name: 'get_inbox',
-    description: 'Get unread messages for the current user',
-    parameters: { type: Type.OBJECT, properties: {} },
-  },
-  {
-    name: 'get_thread',
-    description: 'Get message thread with a specific user',
-    parameters: {
-      type: Type.OBJECT,
-      properties: { other_user_id: str('The other user ID') },
-      required: ['other_user_id'],
-    },
-  },
-  {
-    name: 'mark_read',
-    description: 'Mark a specific message as read',
-    parameters: {
-      type: Type.OBJECT,
-      properties: { message_id: str('The message ID') },
-      required: ['message_id'],
-    },
-  },
-  {
-    name: 'get_user_profile',
-    description: 'Get the current user profile and preferences',
-    parameters: { type: Type.OBJECT, properties: {} },
-  },
-  {
-    name: 'update_preferences',
-    description:
-      'Update the current user preferences (location, delivery preference, communication style, etc.)',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        default_location: str('Default location'),
-        default_delivery_preference: strEnum(['pickup', 'shipping', 'either']),
-        communication_style: strEnum(['brief', 'detailed']),
-        preferred_categories: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING },
-          description: 'Preferred item categories',
-        },
-      },
-    },
-  },
+export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = [
+  tool('search_listings', 'Search active marketplace listings by keywords, category, or price',
+    obj({ query: str('Search keywords'), category: str('Filter by category'), max_price: num('Maximum price in dollars') })),
+  tool('create_listing', 'Create a new item listing for sale. Confirm all details with the user before calling.',
+    obj({ title: str('Listing title'), description: str('Item description'), price: num('Price in dollars'), category: str('Item category'), condition: strEnum(['new', 'like_new', 'good', 'fair', 'parts']), location: str('City or area'), delivery_options: strEnum(['pickup', 'shipping', 'both']) }, ['title', 'description', 'price', 'category'])),
+  tool('get_my_listings', "Get the current user's listings", obj({})),
+  tool('get_expiring_listings', "Get the current user's active listings that are expiring soon (within 3 days). Call this at session start to proactively alert the user.", obj({})),
+  tool('renew_listing', 'Renew a listing to extend it for another 30 days',
+    obj({ listing_id: str('The listing ID to renew') }, ['listing_id'])),
+  tool('close_listing', 'Mark a listing as sold or remove it',
+    obj({ listing_id: str('The listing ID'), reason: strEnum(['sold', 'archived']) }, ['listing_id', 'reason'])),
+  tool('create_wanted_request', 'Post a wanted request for an item the user is looking to buy',
+    obj({ title: str('Short title for what is wanted'), description: str('Detailed description of what is wanted'), category: str('Item category'), max_budget: num('Maximum budget in dollars'), location: str('Location'), delivery_preference: strEnum(['pickup', 'shipping', 'either']) }, ['title', 'description', 'category'])),
+  tool('get_my_wanted_requests', "Get the current user's wanted requests", obj({})),
+  tool('close_wanted_request', 'Close or mark a wanted request as fulfilled',
+    obj({ request_id: str('The request ID'), reason: strEnum(['fulfilled', 'closed']) }, ['request_id', 'reason'])),
+  tool('make_offer', 'Make an offer on a listing',
+    obj({ listing_id: str('The listing ID'), amount: num('Offer amount in dollars'), message: str('Optional message to seller') }, ['listing_id', 'amount'])),
+  tool('get_my_offers', 'Get offers the current user has sent on listings', obj({})),
+  tool('get_offers_on_my_listings', "Get offers other buyers have made on the current user's listings", obj({})),
+  tool('respond_to_offer', 'Accept, reject, or counter an offer on your listing',
+    obj({ offer_id: str('The offer ID'), action: strEnum(['accept', 'reject', 'counter']), counter_amount: num('Counter-offer amount in dollars (required if action is counter)'), counter_message: str('Optional message with the counter-offer') }, ['offer_id', 'action'])),
+  tool('respond_to_counter', "Accept or reject a seller's counter-offer",
+    obj({ offer_id: str('The offer ID'), action: strEnum(['accept', 'reject']) }, ['offer_id', 'action'])),
+  tool('send_message', 'Send a message to another user',
+    obj({ receiver_id: str('The recipient user ID'), body: str('Message body'), offer_id: str('Optional: link message to an offer') }, ['receiver_id', 'body'])),
+  tool('get_inbox', 'Get unread messages for the current user', obj({})),
+  tool('get_thread', 'Get message thread with a specific user',
+    obj({ other_user_id: str('The other user ID') }, ['other_user_id'])),
+  tool('mark_read', 'Mark a specific message as read',
+    obj({ message_id: str('The message ID') }, ['message_id'])),
+  tool('get_user_profile', 'Get the current user profile and preferences', obj({})),
+  tool('update_preferences', 'Update the current user preferences (location, delivery preference, communication style, etc.)',
+    obj({ default_location: str('Default location'), default_delivery_preference: strEnum(['pickup', 'shipping', 'either']), communication_style: strEnum(['brief', 'detailed']), preferred_categories: { type: 'array', items: { type: 'string' }, description: 'Preferred item categories' } })),
 ]
 
 // ─── Tool execution ──────────────────────────────────────────────────────────
